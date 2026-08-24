@@ -1,0 +1,13 @@
+{
+  "name": "bihar-power-bot",
+  "version": "1.0.0",
+  "description": "Cloud power balance bot",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^22.0.0"
+  }
+}
