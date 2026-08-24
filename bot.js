@@ -8,7 +8,10 @@ app.use(express.json());
 // List of your active electricity accounts
 let accounts = [
   { caNumber: "101353117", company: "SBPDCL" },
-  { caNumber: "101329031", company: "SBPDCL" }
+  { caNumber: "101329031", company: "SBPDCL" },
+  { caNumber: "101342329", company: "SBPDCL" },
+  { caNumber: "1071075111", company: "NBPDCL" },
+  { caNumber: "1071075108", company: "NBPDCL" }
 ];
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
