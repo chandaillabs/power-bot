@@ -13,7 +13,7 @@ let accounts = [
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
 
-// 1. HOME ROUTE: Instantly responds to Render & Cron-Job pings, and triggers background fetch
+// 1. HOME ROUTE: Instantly responds to Render & UptimeRobot/Cron-Job pings, and triggers background fetch
 app.get('/', (req, res) => {
   res.send("Chandail Labs Power Bot is Active and Fetching!");
   runBot().catch(err => console.error("Background run error:", err));
@@ -51,9 +51,9 @@ app.listen(PORT, () => {
 async function runBot() {
   console.log("Starting automated batch fetch...");
   try {
+    // Launches Puppeteer using its standard cache-installed browser path automatically
     const browser = await puppeteer.launch({
       headless: "new",
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
     const page = await browser.newPage();
