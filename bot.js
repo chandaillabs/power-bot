@@ -3,35 +3,50 @@ const puppeteer = require('puppeteer');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Basic web route so Render and ping services see a live server
-app.get('/', (req, res) => {
-  res.send("Chandail Labs Cloud Bot is Active!");
+app.use(express.json());
+
+// List of accounts
+let accounts = [
+  { caNumber: "101353117", company: "SBPDCL" },
+  { caNumber: "101329031", company: "SBPDCL" }
+];
+
+const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
+
+// HOME ROUTE: Shows active accounts and triggers fetch
+app.get('/', async (req, res) => {
+  let html = `<h2>Chandail Labs Power Bot is Active!</h2>`;
+  html += `<h3>Currently Added Accounts (${accounts.length}):</h3><ul>`;
+  accounts.forEach(acc => {
+    html += `<li><b>${acc.company}</b> - CA Number: ${acc.caNumber}</li>`;
+  });
+  html += `</ul><p>To add a new CA, go to: <code>/add/CA_NUMBER/COMPANY</code> (e.g. /add/101353117/SBPDCL)</p>`;
+  
+  console.log("Ping received! Running batch fetch for all CA numbers...");
+  await runBot();
+  
+  res.send(html + `<p><i>Automatic fetch executed successfully on ping!</i></p>`);
+});
+
+// ADD ACCOUNT ROUTE: Clean URL structure like /add/101353117/SBPDCL
+app.get('/add/:ca/:company', (req, res) => {
+  const caNumber = req.params.ca;
+  const company = (req.params.company || "SBPDCL").toUpperCase();
+
+  const exists = accounts.some(acc => acc.caNumber === caNumber);
+  if (exists) {
+    return res.send(`<h3>CA Number ${caNumber} is already in the list!</h3><a href="/">View all accounts</a>`);
+  }
+
+  accounts.push({ caNumber, company });
+  res.send(`<h3>Successfully added CA Number: ${caNumber} (${company})!</h3><a href="/">View all accounts</a>`);
 });
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// --- DAILY AUTOMATION LOGIC ---
-const accounts = [
-  { caNumber: "101353117", company: "SBPDCL" },
-  { caNumber: "101329031", company: "SBPDCL" }
-];
-
-// Your exact Google Apps Script URL inserted here
-const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
-
-function scheduleDailyRun() {
-  setInterval(async () => {
-    const now = new Date();
-    // Check if it is roughly 10:00 AM (Hour 10, Minute 0)
-    if (now.getHours() === 10 && now.getMinutes() === 0) {
-      console.log("Triggering 10:00 AM scheduled bot run...");
-      await runBot();
-    }
-  }, 60000); // Checks every minute
-}
-
+// --- AUTOMATION SCRAPING LOGIC ---
 async function runBot() {
   try {
     const browser = await puppeteer.launch({
@@ -109,6 +124,3 @@ async function sendToSheet(caNumber, balance, company) {
     console.error("Sheet sync error:", e);
   }
 }
-
-// Start the clock monitor
-scheduleDailyRun();
