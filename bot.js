@@ -5,7 +5,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// List of accounts
+// List of your accounts
 let accounts = [
   { caNumber: "101353117", company: "SBPDCL" },
   { caNumber: "101329031", company: "SBPDCL" }
@@ -13,33 +13,36 @@ let accounts = [
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
 
-// HOME ROUTE: Shows active accounts and triggers fetch
-app.get('/', async (req, res) => {
-  let html = `<h2>Chandail Labs Power Bot is Active!</h2>`;
-  html += `<h3>Currently Added Accounts (${accounts.length}):</h3><ul>`;
-  accounts.forEach(acc => {
-    html += `<li><b>${acc.company}</b> - CA Number: ${acc.caNumber}</li>`;
-  });
-  html += `</ul><p>To add a new CA, go to: <code>/add/CA_NUMBER/COMPANY</code> (e.g. /add/101353117/SBPDCL)</p>`;
+// 1. HOME ROUTE: Instantly replies to UptimeRobot/Cron-Job so it stays awake, and triggers the bot in the background
+app.get('/', (req, res) => {
+  res.send("Chandail Labs Power Bot is Active and Fetching!");
   
-  console.log("Ping received! Running batch fetch for all CA numbers...");
-  await runBot();
-  
-  res.send(html + `<p><i>Automatic fetch executed successfully on ping!</i></p>`);
+  // Run scraping in the background so it doesn't timeout the ping
+  runBot().catch(err => console.error("Background run error:", err));
 });
 
-// ADD ACCOUNT ROUTE: Clean URL structure like /add/101353117/SBPDCL
+// 2. VIEW ACCOUNTS ROUTE
+app.get('/accounts', (req, res) => {
+  let html = `<h3>Currently Tracked Accounts (${accounts.length}):</h3><ul>`;
+  accounts.forEach(acc => {
+    html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}</li>`;
+  });
+  html += `</ul><p>Add new: <code>/add/CA_NUMBER/SBPDCL</code></p>`;
+  res.send(html);
+});
+
+// 3. ADD ACCOUNT ROUTE
 app.get('/add/:ca/:company', (req, res) => {
   const caNumber = req.params.ca;
   const company = (req.params.company || "SBPDCL").toUpperCase();
 
   const exists = accounts.some(acc => acc.caNumber === caNumber);
   if (exists) {
-    return res.send(`<h3>CA Number ${caNumber} is already in the list!</h3><a href="/">View all accounts</a>`);
+    return res.send(`<h3>CA Number ${caNumber} already exists!</h3><a href="/accounts">View all</a>`);
   }
 
   accounts.push({ caNumber, company });
-  res.send(`<h3>Successfully added CA Number: ${caNumber} (${company})!</h3><a href="/">View all accounts</a>`);
+  res.send(`<h3>Successfully added CA: ${caNumber} (${company})!</h3><a href="/accounts">View all</a>`);
 });
 
 app.listen(PORT, () => {
@@ -48,6 +51,7 @@ app.listen(PORT, () => {
 
 // --- AUTOMATION SCRAPING LOGIC ---
 async function runBot() {
+  console.log("Starting 14-minute automated batch fetch...");
   try {
     const browser = await puppeteer.launch({
       headless: "new",
@@ -108,8 +112,9 @@ async function runBot() {
       await new Promise(r => setTimeout(r, 3000));
     }
     await browser.close();
+    console.log("Batch fetch completed successfully!");
   } catch (e) {
-    console.error("Puppeteer crashed:", e);
+    console.error("Puppeteer crashed during batch run:", e);
   }
 }
 
