@@ -1,13 +1,13 @@
 {
-  "name": "bihar-power-bot",
+  "name": "power-bot",
   "version": "1.0.0",
-  "description": "Cloud power balance bot",
+  "description": "Automated power bill tracker for SBPDCL and NBPDCL",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "puppeteer": "^22.0.0"
+    "puppeteer": "^22.12.1"
   }
 }
