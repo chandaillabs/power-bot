@@ -4,7 +4,8 @@
   "description": "Automated power bill tracker for SBPDCL and NBPDCL",
   "main": "bot.js",
   "scripts": {
-    "start": "node bot.js"
+    "start": "node bot.js",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "dependencies": {
     "express": "^4.19.2",
