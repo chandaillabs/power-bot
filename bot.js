@@ -5,37 +5,42 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// List of your active electricity accounts
+let isFetching = false;
+
+// Active accounts
 let accounts = [
   { caNumber: "101353117", company: "SBPDCL" },
   { caNumber: "101329031", company: "SBPDCL" },
   { caNumber: "101342329", company: "SBPDCL" },
-  { caNumber: "1071075111", company: "NBPDCL" },
-  { caNumber: "1071075108", company: "NBPDCL" }
+  { caNumber: "1071075111", company: "NBPDCL" }
 ];
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
 
-// 1. HOME ROUTE: Instantly responds to Render & UptimeRobot/Cron-Job pings, and triggers background fetch
+// 1. HOME ROUTE
 app.get('/', (req, res) => {
+  if (isFetching) {
+    return res.send("A batch fetch is already in progress. Please check back shortly.");
+  }
   res.send("Chandail Labs Power Bot is Active and Fetching!");
   runBot().catch(err => console.error("Background run error:", err));
 });
 
-// 2. VIEW ACCOUNTS ROUTE: See what is currently tracked
+// 2. VIEW ACCOUNTS ROUTE
 app.get('/accounts', (req, res) => {
   let html = `<h3>Currently Tracked Accounts (${accounts.length}):</h3><ul>`;
   accounts.forEach(acc => {
     html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}</li>`;
   });
-  html += `</ul><p>Add new account via URL: <code>/add/YOUR_CA_NUMBER/SBPDCL</code></p>`;
+  html += `</ul><p>Add new account via: <code>/add/YOUR_CA_NUMBER/SBPDCL</code></p>`;
+  html += `<p>Delete account via: <code>/delete/YOUR_CA_NUMBER</code></p>`;
   res.send(html);
 });
 
-// 3. ADD ACCOUNT ROUTE: Dynamically add new CA numbers without editing code
+// 3. ADD ACCOUNT ROUTE
 app.get('/add/:ca/:company', (req, res) => {
-  const caNumber = req.params.ca;
-  const company = (req.params.company || "SBPDCL").toUpperCase();
+  const caNumber = req.params.ca.replace(/[<>]/g, '').trim();
+  const company = (req.params.company || "SBPDCL").replace(/[<>]/g, '').trim().toUpperCase();
 
   const exists = accounts.some(acc => acc.caNumber === caNumber);
   if (exists) {
@@ -46,28 +51,57 @@ app.get('/add/:ca/:company', (req, res) => {
   res.send(`<h3>Successfully added CA: ${caNumber} (${company})!</h3><a href="/accounts">View all accounts</a>`);
 });
 
+// 4. DELETE ACCOUNT ROUTE
+app.get('/delete/:ca', (req, res) => {
+  const target = req.params.ca.replace(/[<>]/g, '').trim();
+  const prevCount = accounts.length;
+  accounts = accounts.filter(acc => acc.caNumber.replace(/[<>]/g, '').trim() !== target);
+
+  if (accounts.length < prevCount) {
+    res.send(`<h3>Successfully deleted CA: ${target}!</h3><a href="/accounts">View all accounts</a>`);
+  } else {
+    res.send(`<h3>CA Number ${target} was not found!</h3><a href="/accounts">View all accounts</a>`);
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// --- AUTOMATION SCRAPING LOGIC ---
+// --- SCRAPING ENGINE ---
 async function runBot() {
+  if (isFetching) return;
+  isFetching = true;
   console.log("Starting automated batch fetch...");
+
+  let browser = null;
   try {
-    // Launches Puppeteer using its standard cache-installed browser path automatically
-    const browser = await puppeteer.launch({
+    browser = await puppeteer.launch({
       headless: "new",
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+      timeout: 60000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions'
+      ]
     });
+
     const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     for (let acc of accounts) {
       try {
+        console.log(`Processing ${acc.company} CA: ${acc.caNumber}`);
         const url = acc.company === "NBPDCL" 
           ? "https://wss.nbpdcl.co.in/cportal/#/guest/secure/searchbill" 
           : "https://wss.sbpdcl.co.in/cportal/#/guest/secure/searchbill";
 
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'networkidle2', timeout: 35000 });
         await page.waitForSelector('input', { timeout: 15000 });
 
         const inputs = await page.$$('input');
@@ -86,7 +120,7 @@ async function runBot() {
           if (btn) btn.click();
         });
 
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 4500));
 
         await page.evaluate(() => {
           const els = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], span'));
@@ -94,7 +128,7 @@ async function runBot() {
           if (btn) btn.click();
         });
 
-        await new Promise(r => setTimeout(r, 4000));
+        await new Promise(r => setTimeout(r, 4500));
 
         const balanceValue = await page.evaluate(() => {
           const all = Array.from(document.querySelectorAll('*'));
@@ -108,15 +142,20 @@ async function runBot() {
         });
 
         await sendToSheet(acc.caNumber, balanceValue || "Error: Not Found", acc.company);
+        console.log(`Result for ${acc.caNumber}: ${balanceValue}`);
       } catch (err) {
+        console.error(`Error on CA ${acc.caNumber}:`, err.message);
         await sendToSheet(acc.caNumber, "Error: " + err.message, acc.company);
       }
-      await new Promise(r => setTimeout(r, 3000));
+      await new Promise(r => setTimeout(r, 2000));
     }
-    await browser.close();
+
     console.log("Batch fetch completed successfully!");
   } catch (e) {
-    console.error("Puppeteer crashed during batch run:", e);
+    console.error("Puppeteer batch crashed:", e);
+  } finally {
+    if (browser) await browser.close();
+    isFetching = false;
   }
 }
 
