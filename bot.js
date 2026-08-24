@@ -5,7 +5,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// List of your accounts
+// List of your active electricity accounts
 let accounts = [
   { caNumber: "101353117", company: "SBPDCL" },
   { caNumber: "101329031", company: "SBPDCL" }
@@ -13,36 +13,34 @@ let accounts = [
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
 
-// 1. HOME ROUTE: Instantly replies to UptimeRobot/Cron-Job so it stays awake, and triggers the bot in the background
+// 1. HOME ROUTE: Instantly responds to Render & Cron-Job pings, and triggers background fetch
 app.get('/', (req, res) => {
   res.send("Chandail Labs Power Bot is Active and Fetching!");
-  
-  // Run scraping in the background so it doesn't timeout the ping
   runBot().catch(err => console.error("Background run error:", err));
 });
 
-// 2. VIEW ACCOUNTS ROUTE
+// 2. VIEW ACCOUNTS ROUTE: See what is currently tracked
 app.get('/accounts', (req, res) => {
   let html = `<h3>Currently Tracked Accounts (${accounts.length}):</h3><ul>`;
   accounts.forEach(acc => {
     html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}</li>`;
   });
-  html += `</ul><p>Add new: <code>/add/CA_NUMBER/SBPDCL</code></p>`;
+  html += `</ul><p>Add new account via URL: <code>/add/YOUR_CA_NUMBER/SBPDCL</code></p>`;
   res.send(html);
 });
 
-// 3. ADD ACCOUNT ROUTE
+// 3. ADD ACCOUNT ROUTE: Dynamically add new CA numbers without editing code
 app.get('/add/:ca/:company', (req, res) => {
   const caNumber = req.params.ca;
   const company = (req.params.company || "SBPDCL").toUpperCase();
 
   const exists = accounts.some(acc => acc.caNumber === caNumber);
   if (exists) {
-    return res.send(`<h3>CA Number ${caNumber} already exists!</h3><a href="/accounts">View all</a>`);
+    return res.send(`<h3>CA Number ${caNumber} already exists!</h3><a href="/accounts">View all accounts</a>`);
   }
 
   accounts.push({ caNumber, company });
-  res.send(`<h3>Successfully added CA: ${caNumber} (${company})!</h3><a href="/accounts">View all</a>`);
+  res.send(`<h3>Successfully added CA: ${caNumber} (${company})!</h3><a href="/accounts">View all accounts</a>`);
 });
 
 app.listen(PORT, () => {
@@ -51,11 +49,12 @@ app.listen(PORT, () => {
 
 // --- AUTOMATION SCRAPING LOGIC ---
 async function runBot() {
-  console.log("Starting 14-minute automated batch fetch...");
+  console.log("Starting automated batch fetch...");
   try {
     const browser = await puppeteer.launch({
       headless: "new",
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
     });
     const page = await browser.newPage();
 
