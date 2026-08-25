@@ -4,6 +4,6 @@ const { join } = require('path');
  * @type {import("puppeteer").Configuration}
  */
 module.exports = {
-  // Stores Chrome inside the project directory so Render never loses it
+  // Store Chrome permanently in the local project cache
   cacheDirectory: join(__dirname, '.cache', 'puppeteer'),
 };
