@@ -69,6 +69,20 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
+// --- AUTO-REFRESH TIMER (13.5 Minutes) ---
+const INTERVAL_TIME = 13.5 * 60 * 1000; // 810,000 ms
+
+setInterval(async () => {
+  console.log("Running scheduled auto-refresh fetch...");
+  try {
+    // Self-ping to trigger the home route (which calls runBot)
+    await fetch(`https://power-bot-tyto.onrender.com/`);
+  } catch (e) {
+    console.error("Auto-refresh ping error:", e.message);
+  }
+}, INTERVAL_TIME);
+
+
 // --- SCRAPING ENGINE ---
 async function runBot() {
   if (isFetching) return;
@@ -97,7 +111,7 @@ async function runBot() {
       try {
         console.log(`Processing ${acc.company} CA: ${acc.caNumber}`);
         
-        // CRITICAL FIX: Open a completely fresh tab for every single CA number
+        // Open a completely fresh tab for every single CA number
         page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
@@ -159,7 +173,7 @@ async function runBot() {
         console.error(`Error on CA ${acc.caNumber}:`, err.message);
         await sendToSheet(acc.caNumber, "Error: " + err.message, acc.company);
       } finally {
-        // CRITICAL FIX: Close the tab immediately after it finishes so the next one is clean
+        // Close the tab immediately after it finishes so the next one is clean
         if (page) await page.close();
       }
       // Wait 3 seconds before starting the next tab to avoid spamming the website
