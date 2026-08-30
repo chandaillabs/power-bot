@@ -6,6 +6,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 let isFetching = false;
+let currentIndex = 0; // Queue pointer to rotate 1 account per interval
 
 // Active accounts list
 let accounts = [
@@ -18,20 +19,22 @@ let accounts = [
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
 
-// 1. HOME ROUTE
+// 1. HOME ROUTE (Scrapes next single CA in queue)
 app.get('/', (req, res) => {
   if (isFetching) {
-    return res.send("A batch fetch is already in progress. Please check back shortly.");
+    return res.send("A fetch is already in progress. Please check back shortly.");
   }
-  res.send("Chandail Labs Power Bot is Active and Fetching!");
-  runBot().catch(err => console.error("Background run error:", err));
+  const nextAccount = accounts[currentIndex % accounts.length];
+  res.send(`Chandail Labs Power Bot Active! Fetching CA: ${nextAccount.caNumber} (${nextAccount.company})`);
+  runNextAccount().catch(err => console.error("Background run error:", err));
 });
 
 // 2. VIEW ACCOUNTS ROUTE
 app.get('/accounts', (req, res) => {
   let html = `<h3>Currently Tracked Accounts (${accounts.length}):</h3><ul>`;
-  accounts.forEach(acc => {
-    html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}</li>`;
+  accounts.forEach((acc, idx) => {
+    const isNext = idx === (currentIndex % accounts.length) ? " <b><-- Next in Queue</b>" : "";
+    html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}${isNext}</li>`;
   });
   html += `</ul><p>Add new account via: <code>/add/YOUR_CA_NUMBER/SBPDCL</code></p>`;
   html += `<p>Delete account via: <code>/delete/YOUR_CA_NUMBER</code></p>`;
@@ -59,6 +62,7 @@ app.get('/delete/:ca', (req, res) => {
   accounts = accounts.filter(acc => acc.caNumber.replace(/[<>]/g, '').trim() !== target);
 
   if (accounts.length < prevCount) {
+    if (currentIndex >= accounts.length) currentIndex = 0;
     res.send(`<h3>Successfully deleted CA: ${target}!</h3><a href="/accounts">View all accounts</a>`);
   } else {
     res.send(`<h3>CA Number ${target} was not found!</h3><a href="/accounts">View all accounts</a>`);
@@ -69,27 +73,32 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
 
-// --- AUTO-REFRESH TIMER (13.5 Minutes) ---
-const INTERVAL_TIME = 13.5 * 60 * 1000; // 810,000 ms
+// --- AUTO-REFRESH TIMER (1 CA Every 13 Minutes) ---
+const INTERVAL_TIME = 13 * 60 * 1000; // 780,000 ms
 
 setInterval(async () => {
-  console.log("Running scheduled auto-refresh fetch...");
+  console.log("Triggering scheduled single-account scan...");
   try {
-    // Self-ping to trigger the home route (which calls runBot)
-    await fetch(`https://power-bot-tyto.onrender.com/`);
+    const res = await fetch(`https://power-bot-tyto.onrender.com/`);
+    await res.text();
   } catch (e) {
     console.error("Auto-refresh ping error:", e.message);
   }
 }, INTERVAL_TIME);
 
-
-// --- SCRAPING ENGINE ---
-async function runBot() {
-  if (isFetching) return;
+// --- SINGLE ACCOUNT ROTATION SCRAPER ---
+async function runNextAccount() {
+  if (isFetching || accounts.length === 0) return;
   isFetching = true;
-  console.log("Starting automated batch fetch...");
+
+  // Pick target account and increment queue pointer
+  const acc = accounts[currentIndex % accounts.length];
+  currentIndex = (currentIndex + 1) % accounts.length;
+
+  console.log(`Processing single account [${acc.caNumber}] (${acc.company}). Next index will be: ${currentIndex}`);
 
   let browser = null;
+  let page = null;
   try {
     browser = await puppeteer.launch({
       headless: "new",
@@ -106,84 +115,70 @@ async function runBot() {
       ]
     });
 
-    for (let acc of accounts) {
-      let page = null;
-      try {
-        console.log(`Processing ${acc.company} CA: ${acc.caNumber}`);
-        
-        // Open a completely fresh tab for every single CA number
-        page = await browser.newPage();
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    page = await browser.newPage();
+    page.setDefaultNavigationTimeout(35000);
+    page.setDefaultTimeout(35000);
 
-        const url = acc.company === "NBPDCL" 
-          ? "https://wss.nbpdcl.co.in/cportal/#/guest/secure/searchbill" 
-          : "https://wss.sbpdcl.co.in/cportal/#/guest/secure/searchbill";
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 35000 });
-        await page.waitForSelector('input', { timeout: 15000 });
+    const url = acc.company === "NBPDCL" 
+      ? "https://wss.nbpdcl.co.in/cportal/#/guest/secure/searchbill" 
+      : "https://wss.sbpdcl.co.in/cportal/#/guest/secure/searchbill";
 
-        const inputs = await page.$$('input');
-        for (let input of inputs) {
-          const type = await page.evaluate(el => el.getAttribute('type'), input);
-          if (!type || type === 'text' || type === 'number' || type === 'tel') {
-            // Triple click to select old text, hit backspace, then type fresh number
-            await input.click({ clickCount: 3 });
-            await page.keyboard.press('Backspace');
-            await input.type(acc.caNumber, { delay: 100 });
-            break;
-          }
-        }
+    await page.goto(url, { waitUntil: 'networkidle2' });
+    await page.waitForSelector('input');
 
-        await page.evaluate(() => {
-          const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
-          const btn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes('search'));
-          if (btn) btn.click();
-        });
-
-        await new Promise(r => setTimeout(r, 4500));
-
-        await page.evaluate(() => {
-          const els = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], span'));
-          const btn = els.find(el => (el.innerText || el.value || "").includes('Get Current Balance'));
-          if (btn) btn.click();
-        });
-
-        await new Promise(r => setTimeout(r, 4500));
-
-        const balanceValue = await page.evaluate(() => {
-          const all = Array.from(document.querySelectorAll('*'));
-          const label = all.reverse().find(el => el.children.length === 0 && el.innerText && el.innerText.toLowerCase().includes('available balance'));
-          if (!label) return null;
-          let cell = label.closest('td, th, div') || label;
-          let valCell = cell.nextElementSibling || cell.parentElement?.nextElementSibling;
-          let text = valCell ? valCell.innerText : cell.parentElement.innerText;
-          let match = text.match(/-?\s*₹?\s*(-?\d[\d,]*\.?\d*)/);
-          return match ? match[0].replace(/[^0-9.-]/g, '') : null;
-        });
-
-        if (balanceValue) {
-          await sendToSheet(acc.caNumber, balanceValue, acc.company);
-          console.log(`Result for ${acc.caNumber}: ${balanceValue}`);
-        } else {
-          console.log(`Result for ${acc.caNumber}: Error: Not Found`);
-          await sendToSheet(acc.caNumber, "Error: Not Found", acc.company);
-        }
-
-      } catch (err) {
-        console.error(`Error on CA ${acc.caNumber}:`, err.message);
-        await sendToSheet(acc.caNumber, "Error: " + err.message, acc.company);
-      } finally {
-        // Close the tab immediately after it finishes so the next one is clean
-        if (page) await page.close();
+    const inputs = await page.$$('input');
+    for (let input of inputs) {
+      const type = await page.evaluate(el => el.getAttribute('type'), input);
+      if (!type || type === 'text' || type === 'number' || type === 'tel') {
+        await input.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await input.type(acc.caNumber, { delay: 100 });
+        break;
       }
-      // Wait 3 seconds before starting the next tab to avoid spamming the website
-      await new Promise(r => setTimeout(r, 3000));
     }
 
-    console.log("Batch fetch completed successfully!");
-  } catch (e) {
-    console.error("Puppeteer batch crashed:", e);
+    await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+      const btn = buttons.find(b => (b.innerText || b.value || "").toLowerCase().includes('search'));
+      if (btn) btn.click();
+    });
+
+    await new Promise(r => setTimeout(r, 4500));
+
+    await page.evaluate(() => {
+      const els = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"], span'));
+      const btn = els.find(el => (el.innerText || el.value || "").includes('Get Current Balance'));
+      if (btn) btn.click();
+    });
+
+    await new Promise(r => setTimeout(r, 4500));
+
+    const balanceValue = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('*'));
+      const label = all.reverse().find(el => el.children.length === 0 && el.innerText && el.innerText.toLowerCase().includes('available balance'));
+      if (!label) return null;
+      let cell = label.closest('td, th, div') || label;
+      let valCell = cell.nextElementSibling || cell.parentElement?.nextElementSibling;
+      let text = valCell ? valCell.innerText : cell.parentElement.innerText;
+      let match = text.match(/-?\s*₹?\s*(-?\d[\d,]*\.?\d*)/);
+      return match ? match[0].replace(/[^0-9.-]/g, '') : null;
+    });
+
+    if (balanceValue) {
+      await sendToSheet(acc.caNumber, balanceValue, acc.company);
+      console.log(`Result for ${acc.caNumber}: ${balanceValue}`);
+    } else {
+      console.log(`Result for ${acc.caNumber}: Error: Not Found`);
+      await sendToSheet(acc.caNumber, "Error: Not Found", acc.company);
+    }
+
+  } catch (err) {
+    console.error(`Error on CA ${acc.caNumber}:`, err.message);
+    await sendToSheet(acc.caNumber, "Error: " + err.message, acc.company);
   } finally {
+    if (page && !page.isClosed()) await page.close();
     if (browser) await browser.close();
     isFetching = false;
   }
@@ -191,11 +186,12 @@ async function runBot() {
 
 async function sendToSheet(caNumber, balance, company) {
   try {
-    await fetch(API_URL, {
+    const res = await fetch(API_URL, {
       method: "POST",
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ caNumber, availableBalance: balance, company })
     });
+    await res.text();
   } catch (e) {
     console.error("Sheet sync error:", e);
   }
