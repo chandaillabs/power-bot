@@ -7,7 +7,6 @@ app.use(express.json());
 
 let isFetching = false;
 
-// Active accounts list
 let accounts = [
   { caNumber: "101353117", company: "SBPDCL" },
   { caNumber: "101329031", company: "SBPDCL" },
@@ -18,68 +17,32 @@ let accounts = [
 
 const API_URL = "https://script.google.com/macros/s/AKfycbzPaL5u1FJeSHCYdvzOsf3z6rUgzbhtSn_-2iyU1DcIkmMsPzpZOewskpI8z-amjNGM/exec";
 
-// 1. HOME / CRON TRIGGER ROUTE
+// 1. CRON & PING TRIGGER ROUTE
 app.get('/', (req, res) => {
-  if (isFetching) {
-    return res.status(200).send("A batch fetch is already in progress.");
+  // Respond immediately so external cloud pingers never timeout
+  res.status(200).send("Chandail Labs Bot is Active!");
+  
+  if (!isFetching) {
+    runBatchScrape().catch(err => console.error("Scrape error:", err));
   }
-  // Respond immediately so external pings (cron/Google Apps Script) never timeout
-  res.status(200).send("Chandail Labs Bot Awake! Batch scrape triggered in background.");
-  runBatchScrape().catch(err => console.error("Scrape error:", err));
 });
 
-// 2. VIEW ACCOUNTS ROUTE
 app.get('/accounts', (req, res) => {
-  let html = `<h3>Currently Tracked Accounts (${accounts.length}):</h3><ul>`;
-  accounts.forEach((acc) => {
-    html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}</li>`;
-  });
-  html += `</ul><p>Add: <code>/add/YOUR_CA_NUMBER/SBPDCL</code></p>`;
-  html += `<p>Delete: <code>/delete/YOUR_CA_NUMBER</code></p>`;
+  let html = `<h3>Tracked Accounts (${accounts.length}):</h3><ul>`;
+  accounts.forEach(acc => { html += `<li><b>${acc.company}</b> - CA: ${acc.caNumber}</li>`; });
+  html += `</ul>`;
   res.send(html);
 });
 
-// 3. ADD ACCOUNT ROUTE
-app.get('/add/:ca/:company', (req, res) => {
-  const caNumber = req.params.ca.replace(/[<>]/g, '').trim();
-  const company = (req.params.company || "SBPDCL").replace(/[<>]/g, '').trim().toUpperCase();
-
-  if (accounts.some(acc => acc.caNumber === caNumber)) {
-    return res.send(`<h3>CA Number ${caNumber} already exists!</h3><a href="/accounts">View accounts</a>`);
-  }
-
-  accounts.push({ caNumber, company });
-  res.send(`<h3>Added CA: ${caNumber} (${company})!</h3><a href="/accounts">View accounts</a>`);
-});
-
-// 4. DELETE ACCOUNT ROUTE
-app.get('/delete/:ca', (req, res) => {
-  const target = req.params.ca.replace(/[<>]/g, '').trim();
-  const prevCount = accounts.length;
-  accounts = accounts.filter(acc => acc.caNumber.replace(/[<>]/g, '').trim() !== target);
-
-  if (accounts.length < prevCount) {
-    res.send(`<h3>Deleted CA: ${target}!</h3><a href="/accounts">View accounts</a>`);
-  } else {
-    res.send(`<h3>CA Number ${target} not found!</h3><a href="/accounts">View accounts</a>`);
-  }
-});
-
-// Start Express Server
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
-  // AUTO-RUN ON STARTUP/WAKE:
-  setTimeout(() => {
-    console.log("Startup detected: Running initial balance scrape...");
-    runBatchScrape().catch(err => console.error("Initial run error:", err));
-  }, 3000);
 });
 
 // --- SEQUENTIAL SCRAPER (All 5 Accounts) ---
 async function runBatchScrape() {
   if (isFetching || accounts.length === 0) return;
   isFetching = true;
-  console.log(`[${new Date().toLocaleTimeString()}] Starting scrape for ${accounts.length} accounts...`);
+  console.log(`[${new Date().toLocaleTimeString()}] Starting automated scrape for all accounts...`);
 
   let browser = null;
   try {
@@ -101,7 +64,7 @@ async function runBatchScrape() {
     for (let acc of accounts) {
       let page = null;
       try {
-        console.log(`Processing ${acc.company} CA: ${acc.caNumber}`);
+        console.log(`Scraping ${acc.company} CA: ${acc.caNumber}`);
         page = await browser.newPage();
         page.setDefaultNavigationTimeout(35000);
         page.setDefaultTimeout(35000);
@@ -155,9 +118,9 @@ async function runBatchScrape() {
 
         if (balanceValue) {
           await sendToSheet(acc.caNumber, balanceValue, acc.company);
-          console.log(`Success -> ${acc.caNumber}: ₹${balanceValue}`);
+          console.log(`Updated CA ${acc.caNumber}: ₹${balanceValue}`);
         } else {
-          console.log(`Failed -> ${acc.caNumber}: Not Found`);
+          console.log(`CA ${acc.caNumber}: Not found`);
           await sendToSheet(acc.caNumber, "Error: Not Found", acc.company);
         }
 
@@ -171,9 +134,9 @@ async function runBatchScrape() {
       await new Promise(r => setTimeout(r, 2000));
     }
 
-    console.log("Batch run complete! All accounts updated.");
+    console.log("All accounts finished and synced!");
   } catch (e) {
-    console.error("Batch crashed:", e);
+    console.error("Batch scrape failed:", e);
   } finally {
     if (browser) await browser.close();
     isFetching = false;
@@ -189,6 +152,6 @@ async function sendToSheet(caNumber, balance, company) {
     });
     await res.text();
   } catch (e) {
-    console.error("Google Sheet send error:", e);
+    console.error("Sheet send error:", e);
   }
 }
